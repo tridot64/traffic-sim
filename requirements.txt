@@ -1,0 +1,6 @@
+# Core harness has no third-party deps (pure-Python stdlib simulator).
+# Install these for the optional features noted below.
+
+anthropic>=0.40        # only needed for --backend claude
+matplotlib>=3.7        # only needed for visualize.py
+pytest>=7.0            # only needed to run the test suite
