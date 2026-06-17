@@ -104,6 +104,32 @@ def test_freeway_cars_outrun_street_cars():
     assert top_speed(TIERS["freeway"]["vmax"]) > top_speed(TIERS["street"]["vmax"])
 
 
+def test_town_map_has_three_way_junctions_and_is_connected():
+    net = RoadNetwork.from_map(get_map("town"))
+    neighbors: dict = {}
+    for (frm, to) in net.segments:
+        neighbors.setdefault(frm, set()).add(to)
+        neighbors.setdefault(to, set()).add(frm)
+    three_way = {n for n, nb in neighbors.items() if len(nb) == 3}
+    assert {(1, 1), (1, 2), (1, 3), (3, 2)} <= three_way    # genuine T-junctions
+    # asymmetrical: not every node is degree 4 (it is NOT a full grid)
+    assert any(len(nb) != 4 for nb in neighbors.values())
+    # fully connected (reachable from any node)
+    for n in net.nodes:
+        assert net.shortest_path((1, 1), n) is not None
+
+
+def test_town_map_runs_with_signals_at_t_junctions():
+    sim = Simulator(RunConfig(grid=GridConfig(4, 4), road_map=get_map("town"),
+                              sim=SimConfig(ticks=120, decision_interval=5, demand_rate=1.5),
+                              scenario=get_scenario("signals"), controller="actuated", seed=0))
+    assert (1, 1) in sim.signals and len(sim.signals[(1, 1)].valid_pairs) >= 1
+    sc = run_single(RunConfig(grid=GridConfig(4, 4), road_map=get_map("town"),
+                              sim=SimConfig(ticks=120, decision_interval=5, demand_rate=1.5),
+                              scenario=get_scenario("signals"), controller="actuated", seed=0))
+    assert sc["competence"]["arrived"] > 0
+
+
 def test_load_map_json(tmp_path):
     p = tmp_path / "m.json"
     p.write_text(json.dumps({"roads": [{"from": "0,0", "to": "0,1", "vmax": 4},

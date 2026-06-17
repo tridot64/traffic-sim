@@ -114,11 +114,29 @@ def tiered_map(rows: int = 6, cols: int = 6, seed: int = 0,
     return MapConfig(roads=tuple(roads), default_vmax=2, default_cells=10)
 
 
+def _town_map() -> MapConfig:
+    """An asymmetrical 'town': an irregular network (not a full grid) with a
+    fast freeway corridor along row 1, an expressway spur down column 2, and a
+    street grid around them. Has four genuine 3-way (T) junctions — (1,1), (1,2),
+    (1,3), (3,2) — plus pass-throughs and corners. Demonstrates that the NEMA
+    signals work at non-4-way intersections."""
+    F, X, S = TIERS["freeway"], TIERS["expressway"], TIERS["street"]
+    roads: list[dict] = []
+    roads += _bidir("1,0", "1,1", **F) + _bidir("1,1", "1,2", **F) + _bidir("1,2", "1,3", **F)
+    roads += _bidir("1,2", "2,2", **X) + _bidir("2,2", "3,2", **X)
+    for a, b in [("1,1", "0,1"), ("0,1", "0,2"), ("0,2", "0,3"), ("0,3", "1,3"),
+                 ("1,0", "2,0"), ("2,0", "3,0"), ("3,0", "3,1"), ("3,1", "3,2"),
+                 ("3,2", "3,3"), ("1,3", "2,3"), ("2,3", "3,3")]:
+        roads += _bidir(a, b, **S)
+    return MapConfig(roads=tuple(roads), default_vmax=2, default_cells=10)
+
+
 PRESETS = {
     "arterial": _arterial_grid,
     "oneway_loop": _one_way_loop,
     "tiered": lambda: tiered_map(6, 6, seed=0),
     "tiered_big": lambda: tiered_map(8, 8, seed=1, n_freeway=2, n_express=2),
+    "town": _town_map,
 }
 
 

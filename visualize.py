@@ -47,6 +47,9 @@ def _legend_handles():
         (dot(_STATE_COLOR["green"], 11), "signal: green (serving)"),
         (dot(_STATE_COLOR["yellow"], 11), "signal: yellow (clearing)"),
         (dot(_STATE_COLOR["allred"], 11), "signal: all-red (clearing)"),
+        (Line2D([0], [0], marker="o", color="w", markerfacecolor="#2ca02c",
+                markeredgecolor=_HOT, markeredgewidth=2.4, markersize=11),
+         "3-way (T) junction"),
         (Line2D([0], [0], color="black", ls=":"), "closed road"),
         (Line2D([0], [0], color="#cccccc", lw=3), "road (thicker = faster)"),
         (Line2D([0], [0], marker="*", color="w", markerfacecolor=_HOT, markersize=14),
@@ -85,10 +88,20 @@ def _draw(ax, rec):
         ax.annotate(f"hot:{h['inflow']}", (c, -r + 0.28), ha="center", va="bottom",
                     fontsize=6, color="#b35900", zorder=6)
 
+    # node degree (distinct connected neighbors) — to flag 3-way (T) junctions
+    neighbors: dict[str, set] = {}
+    for key in lanes:
+        frm, to = parse_seg_key(key)
+        a, b = f"{frm[0]},{frm[1]}", f"{to[0]},{to[1]}"
+        neighbors.setdefault(a, set()).add(b)
+        neighbors.setdefault(b, set()).add(a)
+
     for node_id, sig in rec.get("signals", {}).items():
         r, c = (int(x) for x in node_id.split(","))
+        deg = len(neighbors.get(node_id, ()))
+        edge = _HOT if deg == 3 else ("white" if deg >= 4 else "#444")  # orange = T-junction
         ax.scatter([c], [-r], s=260, c=[_STATE_COLOR.get(sig["state"], "#888")],
-                   zorder=4, edgecolors="white", linewidths=1.5)
+                   zorder=4, edgecolors=edge, linewidths=2.4 if deg == 3 else 1.5)
         ax.annotate(f"{sig['pair'][0]},{sig['pair'][1]}", (c, -r), ha="center",
                     va="center", fontsize=6, color="white", zorder=5, weight="bold")
 
