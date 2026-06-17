@@ -21,7 +21,8 @@ control loop?** Testbed = traffic management. We score controllers on
   in the visualizer). Set via `GridConfig.speed_limits` overrides or a custom map.
 - **Custom road maps** (`maps.py`, `MapConfig`): grid-subgraph topologies — pick
   which roads exist, direction (one-way), speed, length. Presets `arterial`,
-  `oneway_loop`; JSON via `load_map`; CLI `--map NAME` / `--map-file PATH`.
+  `oneway_loop`, `tiered`/`tiered_big` (seeded random freeway/expressway/street
+  hierarchy via `tiered_map()`); JSON via `load_map`; CLI `--map`/`--map-file`.
   Nodes stay on the integer lattice so NEMA headings remain valid.
 - Fully deterministic from `(RunConfig + seed)`.
 

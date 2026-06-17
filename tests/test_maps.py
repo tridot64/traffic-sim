@@ -2,7 +2,7 @@ import json
 
 from traffic_llm.config import GridConfig, MapConfig, RunConfig, SimConfig
 from traffic_llm.grid import RoadNetwork
-from traffic_llm.maps import get_map, load_map, PRESETS
+from traffic_llm.maps import get_map, load_map, tiered_map, TIERS, PRESETS
 from traffic_llm.runner import run_single
 from traffic_llm.scenarios import get_scenario
 from traffic_llm.simulation import Simulator
@@ -61,6 +61,47 @@ def test_oneway_loop_is_asymmetric():
     # clockwise perimeter present, counter-clockwise dropped
     assert ((0, 0), (0, 1)) in net.segments
     assert ((0, 1), (0, 0)) not in net.segments
+
+
+def test_tiered_map_has_all_three_classes():
+    net = RoadNetwork.from_map(tiered_map(6, 6, seed=0))
+    vmaxes = {seg.vmax for seg in net.segments.values()}
+    assert TIERS["freeway"]["vmax"] in vmaxes
+    assert TIERS["expressway"]["vmax"] in vmaxes
+    assert TIERS["street"]["vmax"] in vmaxes
+
+
+def test_tiered_map_is_reproducible_and_runs():
+    a = tiered_map(6, 6, seed=3)
+    b = tiered_map(6, 6, seed=3)
+    assert a.roads == b.roads                                  # seeded -> reproducible
+    assert a.roads != tiered_map(6, 6, seed=4).roads
+    cfg = RunConfig(grid=GridConfig(6, 6), road_map=get_map("tiered"),
+                    sim=SimConfig(ticks=120, decision_interval=5, demand_rate=2.0),
+                    scenario=get_scenario("dispatcher_hotspots"), controller="actuated", seed=0)
+    sc = run_single(cfg)
+    assert sc["competence"]["arrived"] > 0
+
+
+def test_freeway_cars_outrun_street_cars():
+    # a lone car reaches a higher top speed on a freeway lane than a street lane
+    def top_speed(vmax):
+        sim = Simulator(RunConfig(
+            grid=GridConfig(2, 2, vmax=vmax, cells_per_segment=20),
+            sim=SimConfig(ticks=12, decision_interval=5, demand_rate=0.0),
+            scenario=get_scenario("signals"), controller="donothing", seed=0))
+        car = Car(id=1, origin=(0, 0), dest=(1, 1), born_tick=0, aggressiveness=1.0,
+                  route=[(0, 0), (0, 1), (1, 1)], route_idx=1, state="traveling",
+                  v=0, cell=0, lane=((0, 0), (0, 1)))
+        sim.cars[car.id] = car
+        sim.lanes[((0, 0), (0, 1))].place(0, car)
+        peak = 0
+        for _ in range(8):
+            sim.step_tick()
+            if car.lane == ((0, 0), (0, 1)):
+                peak = max(peak, car.v)
+        return peak
+    assert top_speed(TIERS["freeway"]["vmax"]) > top_speed(TIERS["street"]["vmax"])
 
 
 def test_load_map_json(tmp_path):

@@ -13,8 +13,17 @@ JSON shape:
 from __future__ import annotations
 
 import json
+import random
 
 from .config import MapConfig
+
+# Road hierarchy: speed limit (cells/tick) + length (cells). Freeways are fast
+# and long, streets are slow and short — a realistic urban tier structure.
+TIERS = {
+    "freeway":    {"vmax": 9, "cells": 18},
+    "expressway": {"vmax": 5, "cells": 14},
+    "street":     {"vmax": 2, "cells": 10},
+}
 
 
 def _bidir(a: str, b: str, **attrs) -> list[dict]:
@@ -70,9 +79,46 @@ def _one_way_loop() -> MapConfig:
     return MapConfig(roads=tuple(kept), default_vmax=3, default_cells=12)
 
 
+def tiered_map(rows: int = 6, cols: int = 6, seed: int = 0,
+               n_freeway: int = 1, n_express: int = 2) -> MapConfig:
+    """A seeded random city: a few full rows/cols are FREEWAYS (fast, long), a
+    few more are EXPRESSWAYS, and everything else is slow STREETS. A road's tier
+    comes from the corridor it runs along, so freeways/expressways form coherent
+    high-speed arteries through a street grid."""
+    rng = random.Random(seed)
+    free_rows = set(rng.sample(range(rows), min(n_freeway, rows)))
+    free_cols = set(rng.sample(range(cols), min(n_freeway, cols)))
+    exp_rows = set(rng.sample([r for r in range(rows) if r not in free_rows],
+                              min(n_express, max(0, rows - n_freeway))))
+    exp_cols = set(rng.sample([c for c in range(cols) if c not in free_cols],
+                              min(n_express, max(0, cols - n_freeway))))
+
+    def tier(frm, to) -> str:
+        if frm[0] == to[0]:                       # horizontal road -> its row
+            line, free, exp = frm[0], free_rows, exp_rows
+        else:                                     # vertical road -> its column
+            line, free, exp = frm[1], free_cols, exp_cols
+        if line in free:
+            return "freeway"
+        if line in exp:
+            return "expressway"
+        return "street"
+
+    roads: list[dict] = []
+    for r in range(rows):
+        for c in range(cols):
+            if c + 1 < cols:
+                roads += _bidir(f"{r},{c}", f"{r},{c+1}", **TIERS[tier((r, c), (r, c + 1))])
+            if r + 1 < rows:
+                roads += _bidir(f"{r},{c}", f"{r+1},{c}", **TIERS[tier((r, c), (r + 1, c))])
+    return MapConfig(roads=tuple(roads), default_vmax=2, default_cells=10)
+
+
 PRESETS = {
     "arterial": _arterial_grid,
     "oneway_loop": _one_way_loop,
+    "tiered": lambda: tiered_map(6, 6, seed=0),
+    "tiered_big": lambda: tiered_map(8, 8, seed=1, n_freeway=2, n_express=2),
 }
 
 
