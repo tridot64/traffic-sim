@@ -30,17 +30,20 @@ from .movements import (
 from .signal import IntersectionSignal
 
 MAX_ACTIVE_CARS = 8000
+ADVISORY_TTL = 40       # ticks an LLM routing advisory stays in effect before decaying
 
 
 class MicroSimulator:
     def __init__(self, cfg: RunConfig):
         self.cfg = cfg
-        self.net = RoadNetwork(cfg.grid)
+        self.net = (RoadNetwork.from_map(cfg.road_map) if cfg.road_map
+                    else RoadNetwork(cfg.grid))
         self.rng = random.Random(cfg.seed)
         self.events = EventScheduler(self.net, cfg.scenario, self.rng)
 
-        L = cfg.grid.cells_per_segment
-        self.lanes: dict[SegId, Lane] = {s: Lane(L) for s in self.net.segments}
+        # one CA lane per road, sized + speed-limited per segment
+        self.lanes: dict[SegId, Lane] = {
+            s: Lane(seg.length, seg.vmax) for s, seg in self.net.segments.items()}
 
         self.existing_moves: dict[Node, set[tuple[str, str]]] = {}
         self.signals: dict[Node, IntersectionSignal] = {}
@@ -56,6 +59,7 @@ class MicroSimulator:
 
         self.node_avoid: dict[Node, set[SegId]] = {}
         self.global_avoid: set[SegId] = set()
+        self._advisory_expiry: dict[SegId, int] = {}   # advisories decay, don't accumulate
         self.last_advisory = ""
 
         # destination hotspots: (node, weight, start_tick, end_tick)
@@ -99,17 +103,39 @@ class MicroSimulator:
     def step_tick(self) -> list[dict[str, Any]]:
         self._crossed = 0
         self._arrived_tick = 0
+        self._expire_advisories()
         fired = self.events.step(self.tick)
         for sig in self.signals.values():
             sig.step()
+        self._proactive_reroute()
         self._movement_phase()
         self._inject_demand()
         self.tick += 1
         return fired
 
+    def _expire_advisories(self) -> None:
+        for seg, exp in list(self._advisory_expiry.items()):
+            if exp <= self.tick:
+                del self._advisory_expiry[seg]
+                self.global_avoid.discard(seg)
+
+    def _proactive_reroute(self) -> None:
+        """Cars divert as soon as ANY segment on their remaining route is closed
+        or advised-against — not only when they reach the intersection before it.
+        Skipped entirely when nothing is closed/advised (the common case)."""
+        blocked_set = self.global_avoid | {
+            s for s, seg in self.net.segments.items() if seg.closed}
+        if not blocked_set:
+            return
+        for car in self.cars.values():
+            if car.state != "traveling":
+                continue
+            r, i = car.route, car.route_idx
+            if any((r[j], r[j + 1]) in blocked_set for j in range(i, len(r) - 1)):
+                self._reroute(car, self.global_avoid)   # re-plan from current node
+
     # ------------------------------------------------------------------
     def _movement_phase(self) -> None:
-        vmax = self.cfg.grid.vmax
         just_crossed: set[int] = set()
 
         # PHASE 1 — lead cars crossing intersections
@@ -120,8 +146,8 @@ class MicroSimulator:
                 continue
             lead_i = idxs[0]
             car = lane.at(lead_i)
-            if lead_i + min(car.v + 1, vmax) < lane.length - 1:
-                continue  # cannot reach the stop line this tick
+            if lead_i + min(car.v + 1, lane.vmax) < lane.length - 1:
+                continue  # cannot reach the stop line this tick (own road's limit)
             node = seg[1]
             if node == car.dest:                       # arrival
                 lane.remove(lead_i)
@@ -147,7 +173,7 @@ class MicroSimulator:
             car.advance_index()
             car.lane = target
             car.cell = 0
-            car.v = min(max(car.v, 1), vmax)
+            car.v = min(max(car.v, 1), tlane.vmax)   # obey the new road's limit
             tlane.place(0, car)
             just_crossed.add(car.id)
             self._crossed += 1
@@ -164,7 +190,7 @@ class MicroSimulator:
                     continue
                 gap = lane.gap_ahead(i)
                 ps = p_slow_for(car.aggressiveness, self.cfg.sim.p_slow)
-                plan.append((i, car, ns_new_speed(car.v, gap, vmax, ps, self.rng)))
+                plan.append((i, car, ns_new_speed(car.v, gap, lane.vmax, ps, self.rng)))
             for i, car, nv in plan:
                 car.v = nv
                 if nv > 0:
@@ -303,7 +329,9 @@ class MicroSimulator:
             elif kind == "reroute":
                 self.node_avoid[a["node"]] = set(a["avoid"])
             elif kind == "advisory":
-                self.global_avoid |= set(a["avoid"])
+                for seg in a["avoid"]:                  # decays after ADVISORY_TTL
+                    self._advisory_expiry[seg] = self.tick + ADVISORY_TTL
+                    self.global_avoid.add(seg)
                 self.last_advisory = a.get("text", "")
             elif kind == "close_road":
                 self.net.segments[a["seg"]].closed_operator = True
@@ -386,6 +414,7 @@ class MicroSimulator:
                 seg_key(*s): {
                     "cars": [i for i, c in enumerate(lane.cells) if c is not None],
                     "len": lane.length,
+                    "vmax": lane.vmax,
                     "closed": self.net.segments[s].closed,
                 }
                 for s, lane in self.lanes.items()

@@ -42,11 +42,13 @@ class Segment:
     capacity lives in the micro engine's cellular lanes, not here.
     """
 
-    __slots__ = ("frm", "to", "closed_event", "closed_operator")
+    __slots__ = ("frm", "to", "vmax", "length", "closed_event", "closed_operator")
 
-    def __init__(self, frm: Node, to: Node):
+    def __init__(self, frm: Node, to: Node, vmax: int = 3, length: int = 12):
         self.frm = frm
         self.to = to
+        self.vmax = vmax          # speed limit, cells/tick
+        self.length = length      # road length in CA cells
         self.closed_event = False
         self.closed_operator = False
 
@@ -59,8 +61,15 @@ class Segment:
         return seg_key(self.frm, self.to)
 
 
+def _pnode(s: str) -> Node:
+    r, c = s.split(",")
+    return (int(r), int(c))
+
+
 class RoadNetwork:
     def __init__(self, cfg: GridConfig):
+        """Generate a full rows×cols lattice, with optional per-road speed-limit
+        and length overrides from ``cfg.speed_limits``."""
         self.cfg = cfg
         self.rows = cfg.rows
         self.cols = cfg.cols
@@ -72,8 +81,42 @@ class RoadNetwork:
             for (nr, nc) in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
                 if 0 <= nr < cfg.rows and 0 <= nc < cfg.cols:
                     frm, to = (r, c), (nr, nc)
-                    self.segments[(frm, to)] = Segment(frm, to)
+                    self.segments[(frm, to)] = Segment(frm, to, cfg.vmax, cfg.cells_per_segment)
                     self._adj[frm].append((frm, to))
+
+        for ov in cfg.speed_limits:                  # per-road overrides
+            seg = parse_seg_key(ov["seg"])
+            if seg in self.segments:
+                if "vmax" in ov:
+                    self.segments[seg].vmax = int(ov["vmax"])
+                if "cells" in ov:
+                    self.segments[seg].length = int(ov["cells"])
+
+    @classmethod
+    def from_map(cls, mapcfg) -> "RoadNetwork":
+        """Build a network from an explicit custom map (a grid subgraph). Roads
+        must connect Manhattan-adjacent cells so NEMA headings stay valid."""
+        self = cls.__new__(cls)
+        self.cfg = mapcfg
+        self.segments = {}
+        self._adj = {}
+        node_set: set[Node] = set()
+        for road in mapcfg.roads:
+            frm, to = _pnode(road["from"]), _pnode(road["to"])
+            if abs(frm[0] - to[0]) + abs(frm[1] - to[1]) != 1:
+                raise ValueError(f"road {frm}->{to} must connect adjacent cells")
+            self.segments[(frm, to)] = Segment(
+                frm, to, int(road.get("vmax", mapcfg.default_vmax)),
+                int(road.get("cells", mapcfg.default_cells)))
+            node_set.update((frm, to))
+        self.nodes = sorted(node_set)
+        for n in self.nodes:
+            self._adj[n] = []
+        for (frm, to) in self.segments:
+            self._adj[frm].append((frm, to))
+        self.rows = (max(n[0] for n in self.nodes) + 1) if self.nodes else 0
+        self.cols = (max(n[1] for n in self.nodes) + 1) if self.nodes else 0
+        return self
 
     # ---- lookups -------------------------------------------------------
     def segment(self, frm: Node, to: Node) -> Segment:

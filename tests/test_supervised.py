@@ -68,6 +68,27 @@ def test_bias_shifts_choice_and_bad_target_rejected():
     assert any(r["reason"] == "bad_bias_target" for r in meta["controller_rejected"])
 
 
+def test_null_supervisor_matches_actuated_in_routing_mode():
+    # with a backend that issues nothing, supervised must emit exactly the same
+    # actions as the actuated baseline — incl. its worst-jam routing — in a
+    # routing-enabled scenario.
+    import json
+    from traffic_llm.controllers.baselines import ActuatedController
+    cfg = _cfg("supervised", scenario="dispatcher_hotspots")
+    sim = Simulator(cfg)
+    a = make_controller("actuated")
+    for t in range(40):                       # build up some traffic + a jam
+        if t % 5 == 0:
+            raw, _ = a.decide(sim); sim.apply_actions(raw)
+        sim.step_tick()
+    sup = SupervisedActuatedController(_FakeBackend([]), llm_interval=1)
+    act = ActuatedController()
+    s_actions, _ = sup.decide(sim)
+    a_actions, _ = act.decide(sim)
+    key = lambda L: sorted(json.dumps(x, sort_keys=True) for x in L)
+    assert key(s_actions) == key(a_actions)
+
+
 def test_make_controller_supervised():
     c = make_controller("supervised", backend="mock")
     assert isinstance(c, SupervisedActuatedController)

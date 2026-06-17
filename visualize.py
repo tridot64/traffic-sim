@@ -48,6 +48,7 @@ def _legend_handles():
         (dot(_STATE_COLOR["yellow"], 11), "signal: yellow (clearing)"),
         (dot(_STATE_COLOR["allred"], 11), "signal: all-red (clearing)"),
         (Line2D([0], [0], color="black", ls=":"), "closed road"),
+        (Line2D([0], [0], color="#cccccc", lw=3), "road (thicker = faster)"),
         (Line2D([0], [0], marker="*", color="w", markerfacecolor=_HOT, markersize=14),
          "destination hotspot"),
         (Line2D([0], [0], marker="$5,8$", color="black", linestyle="None", markersize=14),
@@ -67,7 +68,10 @@ def _draw(ax, rec):
         if lane["closed"]:
             ax.plot([x0, x1], [y0, y1], color="black", lw=2, ls=":", zorder=1)
         else:
-            ax.plot([x0, x1], [y0, y1], color="#dddddd", lw=1, zorder=1)
+            # road line width encodes the speed limit (faster road = thicker)
+            vmax = lane.get("vmax", 3)
+            ax.plot([x0, x1], [y0, y1], color="#cccccc", lw=0.6 + 0.5 * vmax, zorder=1,
+                    solid_capstyle="round")
         L = lane["len"]
         for cell in lane["cars"]:
             f = (cell + 0.5) / L

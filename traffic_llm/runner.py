@@ -58,6 +58,7 @@ def run_single(cfg: RunConfig, log_path: Optional[str] = None,
                     "submitted": raw,
                     "accepted": [_serialize_action(a) for a in accepted],
                     "rejected": rejected,
+                    "directives": meta.get("directives", []),  # supervised bias/pin
                     "backend_ms": meta.get("backend_ms"),
                     "failed": meta.get("failed", False),
                     "usage": meta.get("usage", {}),

@@ -17,6 +17,12 @@ control loop?** Testbed = traffic management. We score controllers on
 - Seeded events: random + scripted **road closures** and **demand surges**.
 - **Destination hotspots**: time-varying attractors that pull disproportionate
   trips; surfaced in the observation.
+- **Per-road speed limits + length** (`Segment.vmax/length`, drawn as line width
+  in the visualizer). Set via `GridConfig.speed_limits` overrides or a custom map.
+- **Custom road maps** (`maps.py`, `MapConfig`): grid-subgraph topologies — pick
+  which roads exist, direction (one-way), speed, length. Presets `arterial`,
+  `oneway_loop`; JSON via `load_map`; CLI `--map NAME` / `--map-file PATH`.
+  Nodes stay on the integer lattice so NEMA headings remain valid.
 - Fully deterministic from `(RunConfig + seed)`.
 
 ## Code map
@@ -52,14 +58,21 @@ python3 run_experiment.py ... --backend claude --estimate-cost   # dry-run cost,
   tests green.
 - Actuated **starvation/"locked cells" bug FIXED** (added max-out). Closures are
   modelled; rerouting is reactive (1-hop at stop line) + spawn-time avoidance.
-- **Supervised hybrid built** (LLM supervises actuated via bias/pin) — runs with
-  mock (== actuated); ready for a live Claude run, not yet run.
-- LLM findings so far in `runs/micro_llm/FINDINGS.md`: with a proper interface the
-  LLM is SAFE (0 invalid actions) but NOT competent at per-tick signal control
-  (~½ the throughput of actuated). That motivated the supervised hybrid.
+- **Supervised hybrid built + RUN live, 3 iterations.** Engine fixes landed:
+  advisory now DECAYS (TTL 40, no accumulation), proactive rerouting added
+  (divert when any remaining-route segment is closed), supervised base now ==
+  actuated exactly (incl. worst-jam routing), and bias/pin directives are logged.
+  Those fixes also lifted all baselines ~25% (actuated 1.22 -> 1.52).
+- **Clean supervised result** (`runs/sup_claude3/`): LLM issued 69 bias_phase +
+  71 advisories, 0 rejected, biasing through-phases toward the hotspot corridors
+  (sensible intent). Still DEGRADED actuated: thru 1.21 vs 1.52 (-20%). Coarse
+  global biases disrupt the local per-intersection optimum.
+- Consistent across 3 experiments: with a proper interface the LLM is SAFE
+  (0 invalid/unsafe actions) but NOT net-positive for this real-time control
+  task. A good local feedback algorithm (actuated) is a strong baseline.
+  See `runs/micro_llm/FINDINGS.md` (per-tick).
 
 ## Likely next steps
-- Cost-estimate + live Claude run of the **supervised** controller on
-  `dispatcher_hotspots` (supervisor fires every 4th decision → ~¼ the calls).
-- Optional: proactive rerouting (divert when any segment on the remaining route
-  closes, not just at the last intersection).
+- Optional supervisor tuning: smaller bias weights, fewer interventions, or
+  pin_phase only during surges — to see if a lighter touch ever helps.
+- GitHub: push the latest (engine fixes + findings). Repo: tridot64/traffic-sim.

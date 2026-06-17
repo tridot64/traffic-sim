@@ -50,6 +50,37 @@ def test_actuated_beats_donothing():
     assert a["competence"]["throughput_per_tick"] > d["competence"]["throughput_per_tick"]
 
 
+def test_advisory_decays():
+    from traffic_llm.micro.engine import ADVISORY_TTL
+    sim = Simulator(RunConfig(grid=GridConfig(4, 4),
+        sim=SimConfig(ticks=100, decision_interval=5, demand_rate=0.0),
+        scenario=get_scenario("dispatcher"), controller="donothing", seed=0))
+    seg = ((1, 1), (1, 2))
+    sim.apply_actions([{"action": "advisory", "text": "x", "avoid": ["1,1->1,2"]}])
+    assert seg in sim.global_avoid                  # active now
+    for _ in range(ADVISORY_TTL + 1):
+        sim.step_tick()
+    assert seg not in sim.global_avoid              # decayed, did not accumulate
+
+
+def test_proactive_reroute_diverts_early():
+    from traffic_llm.vehicle import Car
+    sim = Simulator(RunConfig(grid=GridConfig(3, 3),
+        sim=SimConfig(ticks=10, decision_interval=5, demand_rate=0.0),
+        scenario=get_scenario("dispatcher"), controller="donothing", seed=0))
+    # car en route (0,0)->(0,1)->(0,2)->(1,2), approaching (0,1); close a link 2 hops ahead
+    car = Car(id=999, origin=(0, 0), dest=(1, 2), born_tick=0, aggressiveness=0.5,
+              route=[(0, 0), (0, 1), (0, 2), (1, 2)], route_idx=1, state="traveling",
+              v=1, cell=4, lane=((0, 0), (0, 1)))
+    sim.cars[car.id] = car
+    sim.net.segment((0, 2), (1, 2)).closed_operator = True
+    sim._proactive_reroute()
+    assert car.reroutes > 0                                   # diverted early
+    seg_pairs = list(zip(car.route, car.route[1:]))
+    assert ((0, 2), (1, 2)) not in seg_pairs                  # avoids the closure
+    assert car.route[-1] == (1, 2)                            # still reaches dest
+
+
 def test_hotspots_skew_destinations():
     cfg = RunConfig(
         grid=GridConfig(rows=4, cols=4),

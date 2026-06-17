@@ -32,10 +32,11 @@ def ns_new_speed(v: int, gap: int, vmax: int, p_slow: float, rng: random.Random)
 class Lane:
     """Occupancy grid for one directed segment. Stores car objects by cell."""
 
-    __slots__ = ("length", "cells")
+    __slots__ = ("length", "vmax", "cells")
 
-    def __init__(self, length: int):
+    def __init__(self, length: int, vmax: int = 3):
         self.length = length
+        self.vmax = vmax              # this road's speed limit (cells/tick)
         self.cells: list[Optional[object]] = [None] * length
 
     def free(self, i: int) -> bool:

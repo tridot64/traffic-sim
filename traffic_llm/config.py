@@ -17,8 +17,26 @@ class GridConfig:
 
     rows: int = 5
     cols: int = 5
-    cells_per_segment: int = 12        # CA cells per road segment (micro engine)
-    vmax: int = 3                      # max car speed in cells/tick (micro engine)
+    cells_per_segment: int = 12        # default CA cells per road segment
+    vmax: int = 3                      # default max car speed in cells/tick (speed limit)
+    # per-road speed-limit / length overrides on the generated lattice, e.g.
+    # {"seg": "0,0->0,1", "vmax": 5} or {"seg": "...", "vmax": 1, "cells": 8}.
+    speed_limits: tuple = ()
+
+    def asdict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class MapConfig:
+    """A custom road map: an explicit set of directed roads between integer
+    lattice cells (nodes must stay on the grid so NEMA headings are valid, but
+    you choose which roads exist, their direction, speed limit, and length).
+    Each road is {"from":"r,c","to":"r,c","vmax":N?,"cells":N?}."""
+
+    roads: tuple = ()
+    default_vmax: int = 3
+    default_cells: int = 12
 
     def asdict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,6 +123,7 @@ class RunConfig:
     sim: SimConfig = field(default_factory=SimConfig)
     signal: SignalConfig = field(default_factory=SignalConfig)
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
+    road_map: "MapConfig | None" = None  # if set, overrides the generated grid
     controller: str = "actuated"       # llm | actuated | fixed | maxpressure | donothing
     backend: str = "mock"              # claude | mock  (only used when controller == llm)
     model: str = "claude-opus-4-8"
@@ -117,6 +136,7 @@ class RunConfig:
             "sim": self.sim.asdict(),
             "signal": self.signal.asdict(),
             "scenario": self.scenario.asdict(),
+            "road_map": self.road_map.asdict() if self.road_map else None,
             "controller": self.controller,
             "backend": self.backend,
             "model": self.model,

@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..prompts import build_supervisor_system_prompt, supervisor_tool_schemas
-from .baselines import _call, actuated_choice
+from .baselines import _call, _worst_jam_action, actuated_choice
 
 _EMPTY: dict[str, Any] = {}
 _SIGNAL_DIRECTIVES = {"bias_phase", "pin_phase"}
@@ -62,6 +62,10 @@ class SupervisedActuatedController:
             meta = self._last_meta
 
         actions += self._actuated_with_policy(sim)
+        # Base behaves EXACTLY like the actuated baseline (incl. its worst-jam
+        # routing) so that a null supervisor == actuated in every scenario; the
+        # LLM's bias/pin/reroute are the only delta.
+        actions += _worst_jam_action(sim, sim.cfg.scenario.allowed_actions)
         self._decisions += 1
         return actions, meta
 
@@ -76,12 +80,13 @@ class SupervisedActuatedController:
         self.bias = {}                       # each consultation sets a fresh policy
         forwarded: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
+        applied: list[dict[str, Any]] = []   # accepted signal directives (for the log)
         for a in raw:
             act = a.get("action")
             if act == "bias_phase":
-                self._apply_bias(sim, a, rejected)
+                self._apply_bias(sim, a, applied, rejected)
             elif act == "pin_phase":
-                self._apply_pin(sim, a, rejected)
+                self._apply_pin(sim, a, applied, rejected)
             elif act in _SIM_ACTIONS:
                 forwarded.append(a)          # validated later by sim.apply_actions
             else:
@@ -91,10 +96,11 @@ class SupervisedActuatedController:
             "failed": meta.get("failed", False),
             "usage": meta.get("usage", {}),
             "controller_rejected": rejected,
+            "directives": applied,           # so the log shows what the LLM tuned
         }
         return forwarded
 
-    def _apply_bias(self, sim, a, rejected) -> None:
+    def _apply_bias(self, sim, a, applied, rejected) -> None:
         try:
             node = _node(a["node"]); pair = tuple(int(x) for x in a["pair"])
             weight = float(a["weight"])
@@ -104,8 +110,10 @@ class SupervisedActuatedController:
             rejected.append({**a, "reason": "bad_bias_target"}); return
         weight = max(-BIAS_CLAMP, min(BIAS_CLAMP, weight))
         self.bias.setdefault(node, {})[pair] = weight
+        applied.append({"action": "bias_phase", "node": a["node"], "pair": list(pair),
+                        "weight": weight})
 
-    def _apply_pin(self, sim, a, rejected) -> None:
+    def _apply_pin(self, sim, a, applied, rejected) -> None:
         try:
             node = _node(a["node"]); pair = tuple(int(x) for x in a["pair"])
             ticks = int(a.get("ticks", 20))
@@ -115,6 +123,8 @@ class SupervisedActuatedController:
             rejected.append({**a, "reason": "bad_pin_target"}); return
         ticks = max(1, min(MAX_PIN_TICKS, ticks))
         self.pins[node] = (pair, sim.tick + ticks)
+        applied.append({"action": "pin_phase", "node": a["node"], "pair": list(pair),
+                        "ticks": ticks})
 
     # ------------------------------------------------------------------
     def _actuated_with_policy(self, sim) -> list[dict[str, Any]]:

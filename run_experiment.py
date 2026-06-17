@@ -59,6 +59,8 @@ def main() -> int:
     p.add_argument("--decision-interval", type=int, default=10)
     p.add_argument("--rows", type=int, default=5)
     p.add_argument("--cols", type=int, default=5)
+    p.add_argument("--map", default=None, help="custom map preset (arterial, oneway_loop)")
+    p.add_argument("--map-file", default=None, help="path to a custom map JSON")
     p.add_argument("--demand", type=float, default=4.0)
     p.add_argument("--out", default=None, help="output dir for JSONL logs + scorecard")
     p.add_argument("--estimate-cost", action="store_true",
@@ -108,11 +110,18 @@ def main() -> int:
     sim_cfg = SimConfig(ticks=args.ticks, decision_interval=args.decision_interval,
                         demand_rate=args.demand)
     scenario = get_scenario(args.scenario)
+    road_map = None
+    if args.map_file:
+        from traffic_llm.maps import load_map
+        road_map = load_map(args.map_file)
+    elif args.map:
+        from traffic_llm.maps import get_map
+        road_map = get_map(args.map)
 
     results: dict[str, list[dict]] = {c: [] for c in controllers}
     for controller in controllers:
         for seed in seeds:
-            cfg = RunConfig(grid=grid, sim=sim_cfg, scenario=scenario,
+            cfg = RunConfig(grid=grid, sim=sim_cfg, scenario=scenario, road_map=road_map,
                             controller=controller, backend=args.backend,
                             model=args.model, effort=args.effort, seed=seed)
             log_path = None
